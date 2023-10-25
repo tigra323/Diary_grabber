@@ -6,11 +6,18 @@ import dotenv
 import os
 import telebot
 
+DEBUG = True
+
 logger = Logger(
-    debug=True,
+    debug=DEBUG,
     level=20  # logger.INFO
 )
-# dotenv.load_dotenv(f'{os.getcwd()}\\.env')
+if not os.path.isfile('.env') or DEBUG:
+    with open('.env', 'w') as f:
+        f.write('TELEGRAM_BOT_API_TOKEN = ""\nOWNER_ID = ""')
+else:
+    dotenv.load_dotenv(f'{os.getcwd()}\\.env')
+
 bot = telebot.TeleBot(token=os.getenv('TELEGRAM_BOT_API_TOKEN'))
 
 @bot.message_handler(commands=['start'])
