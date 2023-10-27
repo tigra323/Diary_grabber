@@ -10,3 +10,4 @@
 .idea
 /logs/*
 /.env
+__pycache__
