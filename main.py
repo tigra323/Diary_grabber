@@ -20,18 +20,18 @@ logger = Logger(
     debug=DEBUG,
     level=20  # logger.INFO
 )
-if not os.path.isfile('.env'):
+if USING_PYCHARM_ENV or DEBUG:
+    pass
+elif not os.path.isfile('.env'):
     with open('.env', 'w') as f:
         f.write('TELEGRAM_BOT_API_TOKEN = ""\nOWNER_ID = ""\nLOGIN = ""\nPASSWORD = ""')
-elif USING_PYCHARM_ENV or DEBUG:
-    pass
 else:
     dotenv.load_dotenv(f'{os.getcwd()}\\.env')
 
 # bot = telebot.TeleBot(token=os.getenv('TELEGRAM_BOT_API_TOKEN'))
 bot = AsyncTeleBot(token=os.getenv('TELEGRAM_BOT_API_TOKEN'))
 
-async def get_table(cookies):
+async def get_table(cookies) -> dict:
     async with aiohttp.ClientSession(cookies=cookies, headers={"User-Agent": user_agent}) as s:
         r = await s.get(url='https://cabinet.ruobr.ru/child/studies/mark_table/')
         r.raise_for_status()
@@ -48,7 +48,20 @@ async def get_table(cookies):
     return table
 
 
-async def get_cookies():
+async def check_cookies(cookies) -> bool:
+    async with aiohttp.ClientSession(cookies=cookies, headers={"User-Agent": user_agent}) as s:
+        r = await s.get(url='https://cabinet.ruobr.ru/child/studies/mark_table/')
+        r.raise_for_status()
+        raw_html = await r.text(encoding='UTF-8')
+        logger.info(raw_html, to_console=False)
+        soup = BeautifulSoup(raw_html, 'lxml')
+        if soup.find('button', {'class': 'fluid ui primary button'}):
+            return False
+        else:
+            return True
+
+
+async def get_cookies() -> dict:
     cookies = {}
     options = ChromeOptions()
     options.add_argument(f'--user-agent={user_agent}')  # Change useragent
@@ -112,6 +125,8 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
         cookies = await get_cookies()
         old_table = {}
         while True:
+            if not await check_cookies(cookies):
+                cookies = await get_cookies()
             current_table = await get_table(cookies)
             if not old_table:
                 logger.info('Первый запуск')
@@ -152,7 +167,7 @@ async def command_id_handler(message: telebot.types.Message) -> None:
     await bot.reply_to(message, f'Твой ID: {message.from_user.id}')
 
 
-async def start():
+async def start() -> None:
     me = await bot.get_me()
     logger.info(f'Вход как {me.full_name}')
     await bot.infinity_polling()
