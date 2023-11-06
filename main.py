@@ -15,20 +15,27 @@ from selenium.webdriver.common.keys import Keys
 from icecream import ic
 
 DEBUG = False
-USING_PYCHARM_ENV = True
+USING_PYCHARM_ENV = False
 
 logger = Logger(
     debug=DEBUG,
     level=20  # logger.INFO
 )
+working_scrapper = False
+cookies = {}
+user_agent = UserAgent().firefox  # При смене юзер агента сайт выходит
 if USING_PYCHARM_ENV or DEBUG:
     pass
 elif not os.path.isfile('.env'):
     with open('.env', 'w') as f:
         f.write('TELEGRAM_BOT_API_TOKEN = ""\nOWNER_ID = ""\nLOGIN = ""\nPASSWORD = ""')
+    exit()
 else:
     dotenv.load_dotenv(f'{os.getcwd()}\\.env')
 
+if not os.getenv('TELEGRAM_BOT_API_TOKEN'):
+    logger.critical('Впишите токен в .env')
+    raise Exception
 
 class ExceptionHandler(telebot.ExceptionHandler):
     def handle(self, exception):
@@ -174,7 +181,7 @@ async def get_cookies() -> dict:
 
 @bot.message_handler(commands=['start'])
 async def command_start_handler(message: telebot.types.Message) -> None:
-    if message.chat.id == int(os.getenv('OWNER_ID')):
+    if str(message.chat.id) == os.getenv('OWNER_ID'):
         keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
         if DEBUG:
             keyboard.add(telebot.types.KeyboardButton(text="/id"), telebot.types.KeyboardButton(text="/start"))
@@ -182,7 +189,7 @@ async def command_start_handler(message: telebot.types.Message) -> None:
                      telebot.types.KeyboardButton(text="/get_tables"))
         keyboard.add(telebot.types.KeyboardButton(text="/more_info"))
         await bot.reply_to(message, 'Готово', reply_markup=keyboard)
-    elif os.getenv('OWNER_ID') == '':
+    elif not os.getenv('OWNER_ID'):
         kb = [telebot.types.KeyboardButton(text="/id"),
               telebot.types.KeyboardButton(text="/start")]
         keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -193,7 +200,7 @@ async def command_start_handler(message: telebot.types.Message) -> None:
 
 @bot.message_handler(commands=['start_scrapper'])
 async def command_start_scrapper_handler(message: telebot.types.Message) -> None:
-    if message.chat.id == int(os.getenv('OWNER_ID')):
+    if str(message.chat.id) == os.getenv('OWNER_ID'):
         global working_scrapper
         if not working_scrapper:
             working_scrapper = True
@@ -219,7 +226,7 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
 
 @bot.message_handler(commands=['get_tables'])
 async def command_start_scrapper_handler(message: telebot.types.Message) -> None:
-    if message.chat.id == int(os.getenv('OWNER_ID')):
+    if str(message.chat.id) == os.getenv('OWNER_ID'):
         await check_cookies()
         table = await get_table()
         ans = ''
@@ -243,7 +250,7 @@ async def command_id_handler(message: telebot.types.Message) -> None:
 
 @bot.message_handler(commands=['more_info'])
 async def command_id_handler(message: telebot.types.Message) -> None:
-    if message.chat.id == int(os.getenv('OWNER_ID')):
+    if str(message.chat.id) == os.getenv('OWNER_ID'):
         await bot.reply_to(message, 'Выберете предмет', reply_markup=await subject_keyboard())
 
 async def start() -> None:
@@ -253,7 +260,4 @@ async def start() -> None:
 
 
 if __name__ == '__main__':
-    working_scrapper = False
-    cookies = {}
-    user_agent = UserAgent().firefox  # При смене юзер агента сайт выходит
     asyncio.run(start())

@@ -1,9 +1,12 @@
 [tool.poetry]
 name = "dnevnik grabber"
-version = "0.1.0"
+version = "2.0.1"
 description = ""
-authors = ["Your Name <you@example.com>"]
+authors = ["Tigra323 tigra323_for_github@mail.ru" ]
 readme = "README.md"
+
+[tool.poetry.urls]
+repository = "https://github.com/tigra323/Diary_grabber"
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -15,6 +18,9 @@ pytelegrambotapi = "^4.14.0"
 fake-useragent = "^1.3.0"
 selenium = "^4.14.0"
 icecream = "^2.1.3"
+
+[tool.poetry.extras]
+debug = ["icecream"]
 
 [build-system]
 requires = ["poetry-core"]
