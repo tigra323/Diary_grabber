@@ -1,7 +1,6 @@
 import aiohttp
 from bs4 import BeautifulSoup
 from logger import Logger
-import dotenv
 import os
 import asyncio
 import telebot
@@ -12,7 +11,7 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 import selenium.common.exceptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from icecream import ic
+# from icecream import ic
 
 DEBUG = False
 USING_PYCHARM_ENV = False
@@ -22,6 +21,7 @@ logger = Logger(
     level=20  # logger.INFO
 )
 working_scrapper = False
+working_cookie = False
 cookies = {}
 user_agent = UserAgent().firefox  # При смене юзер агента сайт выходит
 if USING_PYCHARM_ENV or DEBUG:
@@ -29,8 +29,10 @@ if USING_PYCHARM_ENV or DEBUG:
 elif not os.path.isfile('.env'):
     with open('.env', 'w') as f:
         f.write('TELEGRAM_BOT_API_TOKEN = ""\nOWNER_ID = ""\nLOGIN = ""\nPASSWORD = ""')
-    exit()
+    import dotenv
+    dotenv.load_dotenv(f'{os.getcwd()}\\.env')
 else:
+    import dotenv
     dotenv.load_dotenv(f'{os.getcwd()}\\.env')
 
 if not os.getenv('TELEGRAM_BOT_API_TOKEN'):
@@ -61,17 +63,29 @@ async def handle_query(call):
                 only_marks.remove('УП')
             for i in range(only_marks.count('Б')):
                 only_marks.remove('Б')
-            only_marks_table[name] = list(map(int, only_marks))*1
+            if only_marks and only_marks != ['']:
+                only_marks_table[name] = list(map(int, only_marks))*1
+            else:
+                only_marks_table[name] = []
 
         ans = f'{call.data}\n'
         ans += f'Текущие оценки: {table[call.data]}\n'
-        ans += f'Текущий средний балл: {round(sum(only_marks_table[call.data]) / len(only_marks_table[call.data]), 2)}\n'
+        if only_marks_table[call.data]:
+            suma = sum(only_marks_table[call.data])
+        else:
+            suma = 0
+        if len(only_marks_table[call.data]):
+            length = len(only_marks_table[call.data])
+        else:
+            length = 1
+
+        ans += f'Текущий средний балл: {round(suma / length, 2)}\n'
         ans += '\n'
-        ans += f'При получении 5: {round((sum(only_marks_table[call.data]) + 5) / (len(only_marks_table[call.data]) + 1), 2)}\n'
-        ans += f'При получении 4: {round((sum(only_marks_table[call.data]) + 4) / (len(only_marks_table[call.data]) + 1), 2)}\n'
-        ans += f'При получении 3: {round((sum(only_marks_table[call.data]) + 3) / (len(only_marks_table[call.data]) + 1), 2)}\n'
-        ans += f'При получении 2: {round((sum(only_marks_table[call.data]) + 2) / (len(only_marks_table[call.data]) + 1), 2)}\n'
-        ans += f'При получении 1: {round((sum(only_marks_table[call.data]) + 1) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        ans += f'При получении 5: {round((suma + 5) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        ans += f'При получении 4: {round((suma + 4) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        ans += f'При получении 3: {round((suma + 3) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        ans += f'При получении 2: {round((suma + 2) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        ans += f'При получении 1: {round((suma + 1) / (len(only_marks_table[call.data]) + 1), 2)}\n'
 
         await bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                     text=ans, reply_markup=await back_keyboard())
@@ -94,7 +108,6 @@ async def subject_keyboard():
         if name in table:
             inline_buttons_list.append(telebot.types.InlineKeyboardButton(name, callback_data=name))
     return telebot.types.InlineKeyboardMarkup(await build_menu(inline_buttons_list, n_cols=2))
-
 
 async def back_keyboard():
     return telebot.types.InlineKeyboardMarkup(
@@ -121,6 +134,9 @@ async def get_table() -> dict:
 
 async def check_cookies() -> None:
     global cookies
+    global working_cookie
+    while working_cookie:
+        await asyncio.sleep(1)
     if cookies:
         async with aiohttp.ClientSession(cookies=cookies, headers={"User-Agent": user_agent}) as s:
             r = await s.get(url='https://cabinet.ruobr.ru/child/studies/mark_table/')
@@ -134,7 +150,9 @@ async def check_cookies() -> None:
         cookies = await get_cookies()
 
 async def get_cookies() -> dict:
+    global working_cookie
     logger.info('Получение куки')
+    working_cookie = True
     await bot.send_message(os.getenv('OWNER_ID'), 'Получение куки')
     lcookies = {}
     options = ChromeOptions()
@@ -177,6 +195,7 @@ async def get_cookies() -> dict:
         lcookies[c['name']] = c['value']
     driver.close()
     driver.quit()
+    working_cookie = False
     return lcookies
 
 @bot.message_handler(commands=['start'])
@@ -205,22 +224,68 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
         if not working_scrapper:
             working_scrapper = True
             old_table = {}
+            current_table = {}
             while True:
-                await check_cookies()
-                current_table = await get_table()
-                if not old_table:
-                    logger.info('Первый запуск')
-                elif not old_table == current_table:
-                    logger.info('Изменение')
-                    change = ''
-                    for i in current_table:
-                        if current_table[i] != old_table[i]:
-                            change += f'{i}: \nБыло: {old_table[i]}\nСтало: {current_table[i]}'
-                    await bot.send_message(os.getenv('OWNER_ID'), change)
-                else:
-                    logger.info('Без изменений')
-                old_table = current_table
-                await asyncio.sleep(300)
+                try:
+                    await check_cookies()
+                    current_table = await get_table()
+                    # ic(current_table)
+                    if not old_table:
+                        logger.info('Первый запуск')
+                        await bot.send_message(os.getenv('OWNER_ID'), 'Скраппер запущен')
+                        if os.path.isfile('last.txt'):
+                            with open('last.txt', 'r', encoding='utf8') as f:
+                                for line in f:
+                                    line = line.strip().split(':')
+                                    old_table[line[0]] = line[-1].split(',')
+                            logger.info('Загружена последняя таблица')
+                            # logger.info(old_table)
+                    elif not old_table == current_table:
+                        logger.info('Изменение')
+                        change = ''
+                        logger.info(old_table, to_console=False)
+                        logger.info(current_table, to_console=False)
+                        for i in current_table:
+                            if current_table[i] != old_table[i]:
+                                new = []
+                                removed = []
+                                marks = (set(current_table[i]) | set(old_table[i])) - {''}
+                                for mark in marks:
+                                    if current_table[i].count(mark) - old_table[i].count(mark) > 0:
+                                        for _ in range(current_table[i].count(mark) - old_table[i].count(mark)):
+                                            new.append(mark)
+                                    elif current_table[i].count(mark) - old_table[i].count(mark) < 0:
+                                        for _ in range(old_table[i].count(mark) - current_table[i].count(mark)):
+                                            removed.append(mark)
+                                if (not new) and (not removed):
+                                    logger.info(f'Без изменений, поменялся порядок у {i}')
+                                    continue
+                                logger.info(new, removed)
+                                change += f'{i}:\n'
+                                if new:
+                                    logger.info(f'Добавили: {new}')
+                                    change += f'Добавили: {new}\n'
+                                if removed:
+                                    logger.info(f'Убрали: {removed}')
+                                    change += f'Убрали: {removed}\n'
+                                logger.info(change, to_console=False)
+                                change += '\n'
+                                # change += f'{i}: \nБыло: {old_table[i]}\nСтало: {current_table[i]}\n\n'
+                        if change:
+                            await bot.send_message(os.getenv('OWNER_ID'), change.strip('\n'))
+                        else:
+                            logger.info('Ложное срабатывание')
+                    else:
+                        logger.info('Без изменений')
+                    old_table = current_table
+                    with open('last.txt', 'w', encoding='utf8') as f:
+                        for line in current_table:
+                            f.write(line + ':' + ','.join(current_table[line]) + '\n')
+                except Exception as ex:
+                    logger.critical(ex)
+                    logger.error(str(old_table) + '\n' + str(current_table))
+                    await bot.send_message(os.getenv('OWNER_ID'), str(ex) + '\n' + str(old_table) + '\n' + str(current_table))
+                await asyncio.sleep(60 * 3)
         else:
             await bot.send_message(os.getenv('OWNER_ID'), 'Уже запущено')
 
@@ -238,11 +303,20 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
                 only_marks.remove('УП')
             for i in range(only_marks.count('Б')):
                 only_marks.remove('Б')
-            only_marks = list(map(int, only_marks))
-            ans += f'*{name}*: {", ".join(table[name])} - *{round(sum(only_marks) / len(only_marks), 2)}*\n'
-        ans.strip('\n')
-        logger.info(ans, to_console=False)
-        await bot.reply_to(message, ans, parse_mode="Markdown")
+
+            if only_marks and only_marks != ['']:
+                only_marks = list(map(int, only_marks))
+            else:
+                only_marks = []
+
+            if only_marks:
+                avg = round(sum(only_marks) / len(only_marks), 2)
+            else:
+                avg = 0
+
+            ans += f'*{name}*: {", ".join(table[name])} - *{avg}*\n'
+        logger.info(ans.strip('\n'), to_console=False)
+        await bot.reply_to(message, ans.strip('\n'), parse_mode="Markdown")
 
 @bot.message_handler(commands=['id'])
 async def command_id_handler(message: telebot.types.Message) -> None:
