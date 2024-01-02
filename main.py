@@ -15,6 +15,7 @@ from selenium.webdriver.common.keys import Keys
 
 DEBUG = False
 USING_PYCHARM_ENV = False
+scrapper_cd = 5
 
 logger = Logger(
     debug=DEBUG,
@@ -53,20 +54,7 @@ async def handle_query(call):
                                     text='Выберете предмет:', reply_markup=await subject_keyboard())
     else:
         await check_cookies()
-        table = await get_table()
-        only_marks_table = {}
-        for name in table:
-            only_marks = table[name]*1  # *1 нужно чтобы таблица и переменная не были связанны
-            for i in range(only_marks.count('Н')):
-                only_marks.remove('Н')
-            for i in range(only_marks.count('УП')):
-                only_marks.remove('УП')
-            for i in range(only_marks.count('Б')):
-                only_marks.remove('Б')
-            if only_marks and only_marks != ['']:
-                only_marks_table[name] = list(map(int, only_marks))*1
-            else:
-                only_marks_table[name] = []
+        table, only_marks_table = await get_table(return_both=True)
 
         ans = f'{call.data}\n'
         ans += f'Текущие оценки: {table[call.data]}\n'
@@ -74,18 +62,28 @@ async def handle_query(call):
             suma = sum(only_marks_table[call.data])
         else:
             suma = 0
-        if len(only_marks_table[call.data]):
-            length = len(only_marks_table[call.data])
-        else:
-            length = 1
+        length = len(only_marks_table[call.data])
 
-        ans += f'Текущий средний балл: {round(suma / length, 2)}\n'
+        if length:
+            ans += f'Текущий средний балл: {round(suma / length, 2)}\n'
+        else:
+            ans += f'Текущий средний балл: {round(suma / 1, 2)}\n'
+
         ans += '\n'
         ans += f'При получении 5: {round((suma + 5) / (len(only_marks_table[call.data]) + 1), 2)}\n'
         ans += f'При получении 4: {round((suma + 4) / (len(only_marks_table[call.data]) + 1), 2)}\n'
         ans += f'При получении 3: {round((suma + 3) / (len(only_marks_table[call.data]) + 1), 2)}\n'
         ans += f'При получении 2: {round((suma + 2) / (len(only_marks_table[call.data]) + 1), 2)}\n'
         ans += f'При получении 1: {round((suma + 1) / (len(only_marks_table[call.data]) + 1), 2)}\n'
+        if length:
+            if round(suma / length, 2) < 4.5:
+                to_five = 0
+                ans += '\n'
+                while round(suma / length, 2) < 4.5:
+                    suma += 5
+                    length += 1
+                    to_five += 1
+                ans += f'Чтобы получить 5 за четверть нужно получить {to_five} пятерок\n'
 
         await bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                     text=ans, reply_markup=await back_keyboard())
@@ -105,8 +103,7 @@ async def subject_keyboard():
     table = await get_table()
     inline_buttons_list = []
     for name in table.keys():
-        if name in table:
-            inline_buttons_list.append(telebot.types.InlineKeyboardButton(name, callback_data=name))
+        inline_buttons_list.append(telebot.types.InlineKeyboardButton(name, callback_data=name))
     return telebot.types.InlineKeyboardMarkup(await build_menu(inline_buttons_list, n_cols=2))
 
 async def back_keyboard():
@@ -117,7 +114,7 @@ async def back_keyboard():
                     callback_data='back'
                 )]])
 
-async def get_table() -> dict:
+async def get_table(only_marks: bool = False, return_both: bool = False):
     async with aiohttp.ClientSession(cookies=cookies, headers={"User-Agent": user_agent}) as s:
         r = await s.get(url='https://cabinet.ruobr.ru/child/studies/mark_table/')
         r.raise_for_status()
@@ -125,11 +122,29 @@ async def get_table() -> dict:
         soup = BeautifulSoup(raw_html, 'lxml')
     raw_table = soup.find('table', {'id': 'in_rows', 'class': 'hide'})
     table = {}
+    table2 = {}
+    name = ''
     for row in raw_table.find('tbody').find_all('tr'):
-        elements = []
+        only_n_marks = []
+        _marks = []
         for element in row.find_all('td'):
-            elements.append(element.string.strip().split('\n')[-1].strip(','))
-        table[elements[0]] = elements[1].split(', ')[::-1]
+            marks = element.string.strip().split('\n')[-1].strip(',')
+            if '.' in element.string:
+                continue
+            if not (',' in element.string) or marks.upper() != marks:
+                name = marks
+                continue
+            marks = marks.split(', ')
+            for mark in marks:
+                if mark.isdigit():
+                    only_n_marks.append(int(mark))
+                _marks.append(mark)
+        table[name] = _marks[::-1]
+        table2[name] = only_n_marks[::-1]
+    if return_both:
+        return table, table2
+    if only_marks:
+        return table2
     return table
 
 async def check_cookies() -> None:
@@ -222,6 +237,7 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
     if str(message.chat.id) == os.getenv('OWNER_ID'):
         global working_scrapper
         if not working_scrapper:
+            first_start = False
             working_scrapper = True
             old_table = {}
             current_table = {}
@@ -237,8 +253,10 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
                             with open('last.txt', 'r', encoding='utf8') as f:
                                 for line in f:
                                     line = line.strip().split(':')
-                                    old_table[line[0]] = line[-1].split(',')
+                                    current_table[line[0]] = line[-1].split(',')
                             logger.info('Загружена последняя таблица')
+                            await asyncio.sleep(5)
+                            first_start = True
                             # logger.info(old_table)
                     elif not old_table == current_table:
                         logger.info('Изменение')
@@ -284,8 +302,14 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
                 except Exception as ex:
                     logger.critical(ex)
                     logger.error(str(old_table) + '\n' + str(current_table))
-                    await bot.send_message(os.getenv('OWNER_ID'), str(ex) + '\n' + str(old_table) + '\n' + str(current_table))
-                await asyncio.sleep(60 * 3)
+                    try:
+                        await bot.send_message(os.getenv('OWNER_ID'), str(ex) + '\n' + str(old_table) + '\n' + str(current_table))
+                    except Exception:
+                        pass
+                if first_start:
+                    first_start = False
+                else:
+                    await asyncio.sleep(60 * scrapper_cd)
         else:
             await bot.send_message(os.getenv('OWNER_ID'), 'Уже запущено')
 
@@ -293,27 +317,13 @@ async def command_start_scrapper_handler(message: telebot.types.Message) -> None
 async def command_start_scrapper_handler(message: telebot.types.Message) -> None:
     if str(message.chat.id) == os.getenv('OWNER_ID'):
         await check_cookies()
-        table = await get_table()
+        table, table2 = await get_table(return_both=True)
         ans = ''
-        for name in table:
-            only_marks = table[name] * 1  # *1 нужно чтобы таблица и переменная не были связанны
-            for i in range(only_marks.count('Н')):
-                only_marks.remove('Н')
-            for i in range(only_marks.count('УП')):
-                only_marks.remove('УП')
-            for i in range(only_marks.count('Б')):
-                only_marks.remove('Б')
-
-            if only_marks and only_marks != ['']:
-                only_marks = list(map(int, only_marks))
-            else:
-                only_marks = []
-
-            if only_marks:
-                avg = round(sum(only_marks) / len(only_marks), 2)
+        for name in table2:
+            if table2[name]:
+                avg = round(sum(table2[name]) / len(table2[name]), 2)
             else:
                 avg = 0
-
             ans += f'*{name}*: {", ".join(table[name])} - *{avg}*\n'
         logger.info(ans.strip('\n'), to_console=False)
         await bot.reply_to(message, ans.strip('\n'), parse_mode="Markdown")
